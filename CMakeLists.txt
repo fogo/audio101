@@ -9,3 +9,12 @@ set(PCM_PLAYER_SRC_FILES src/playpcm.cpp src/pcm_player.cpp)
 add_executable(playpcm ${PCM_PLAYER_SRC_FILES})
 target_link_libraries(playpcm PUBLIC asound ${CMAKE_THREAD_LIBS_INIT})
 target_include_directories(playpcm PRIVATE include/)
+
+# Still have to come w/ a proper test. Testing audio is not easy, you know.
+# First attempts w/ null device were not promising, maybe use LD_PRELOAD
+# w/ fake ALSA lib?
+enable_testing()
+add_test(
+    NAME test_bin
+    COMMAND playpcm --help
+)
