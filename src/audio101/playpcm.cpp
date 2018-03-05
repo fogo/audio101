@@ -47,18 +47,18 @@ void control_loop(audio101::PcmPlayer &player) {
     // could be improved by using event to listen to pause/resume.
     // for simplicity, right now kept as polling.
     audio101::PlayerState state;
-    while ((state = player.state()) != audio101::psIdle) {
+    while ((state = player.state()) != audio101::PlayerState::idle) {
         if (stopped) {
             player.stop();
             stopped = false;
             break;
         }
-        if (state == audio101::psPlaying) {
+        if (state == audio101::PlayerState::playing) {
             if (toggle_pause_audio) {
                 toggle_pause_audio = false;
                 player.pause();
             }
-        } else if (state == audio101::psPaused) {
+        } else if (state == audio101::PlayerState::paused) {
             if (toggle_pause_audio) {
                 toggle_pause_audio = false;
                 player.resume();
@@ -105,9 +105,9 @@ void dashboard_loop(audio101::PcmPlayer &player) {
 
     // could be improved by using event to listen to done.
     // for simplicity, right now kept as polling.
-    while ((state = player.state()) != audio101::psIdle) {
+    while ((state = player.state()) != audio101::PlayerState::idle) {
         const auto current = std::chrono::steady_clock::now();
-        if (state == audio101::psPlaying) {
+        if (state == audio101::PlayerState::playing) {
             delta = static_cast<unsigned >(
                     std::ceil(
                             std::chrono::duration<double, std::milli>(
@@ -116,7 +116,7 @@ void dashboard_loop(audio101::PcmPlayer &player) {
             // duration to current
             delta += former_delta;
             suffix = (suffix == &paused) ? &rollback : &nothing;
-        } else if (state == audio101::psPaused) {
+        } else if (state == audio101::PlayerState::paused) {
             // Store old duration and keep updating start until resumed
             start = current;
             // TODO: this isn't ideal, it still messes timer after some pauses/resumes

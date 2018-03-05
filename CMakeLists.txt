@@ -3,18 +3,30 @@ project(audio101)
 
 set(CMAKE_CXX_STANDARD 14)
 
+set(CMAKE_VERBOSE_MAKEFILE OFF)
+
 find_package(Threads)
 
-set(PCM_PLAYER_SRC_FILES src/audio101/playpcm.cpp src/audio101/pcm_player.cpp)
-add_executable(playpcm ${PCM_PLAYER_SRC_FILES})
-target_link_libraries(playpcm PUBLIC asound ${CMAKE_THREAD_LIBS_INIT})
-target_include_directories(playpcm PRIVATE include/)
+add_library(pcm_player STATIC src/audio101/pcm_player.cpp)
+target_include_directories(pcm_player PUBLIC include/)
+target_link_libraries(pcm_player PRIVATE asound ${CMAKE_THREAD_LIBS_INIT})
 
-# Still have to come w/ a proper test. Testing audio is not easy, you know.
-# First attempts w/ null device were not promising, maybe use LD_PRELOAD
-# w/ fake ALSA lib?
+add_executable(playpcm src/audio101/playpcm.cpp)
+target_link_libraries(playpcm PRIVATE pcm_player)
+
+add_library(fakeasound SHARED src/fakeasound/fakeasound.cpp)
+target_include_directories(fakeasound PUBLIC include/)
+
+add_subdirectory(test)
+
 enable_testing()
 add_test(
     NAME test_bin
     COMMAND playpcm --help
 )
+
+add_test(
+    NAME test_pcm_player
+    COMMAND test_pcm_player
+)
+set_tests_properties(test_pcm_player PROPERTIES ENVIRONMENT LD_PRELOAD=$<TARGET_FILE:fakeasound>)

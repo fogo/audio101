@@ -21,8 +21,16 @@ audio101::PcmPlayer::PcmPlayer(const char *device, unsigned sample_rate, unsigne
     // Hardware covers format expected and way buffer is written/read.
     // Software, not used here, offers some control options like
     // threshold of samples in buffer to start playback, for example.
-    snd_pcm_hw_params_malloc(&pcm_params_);
-    snd_pcm_hw_params_any(pcm_handle_, pcm_params_);
+    if ((err = snd_pcm_hw_params_malloc(&pcm_params_)) < 0) {
+        std::string msg("Unable to allocate memory for hw params, error is: ");
+        msg += snd_strerror(err);
+        throw std::runtime_error(msg.c_str());
+    }
+    if ((err = snd_pcm_hw_params_any(pcm_handle_, pcm_params_)) < 0) {
+        std::string msg("Unable to fill hw params configuration, error is: ");
+        msg += snd_strerror(err);
+        throw std::runtime_error(msg.c_str());
+    }
 
     // Here we start to configure the playback device to our desired
     // parameters.
@@ -82,7 +90,7 @@ audio101::PcmPlayer::PcmPlayer(const char *device, unsigned sample_rate, unsigne
 
 audio101::PcmPlayer::~PcmPlayer()
 {
-    if (!stopped_) {
+    if (/*state_ == PlayerState::playing && */!stopped_) {
         stop();
     }
     snd_pcm_close(pcm_handle_);
@@ -113,6 +121,12 @@ unsigned audio101::PcmPlayer::sample_rate() const
     return actual_rate;
 }
 
+unsigned audio101::PcmPlayer::bytes_per_sample() const {
+    // every sample is 2 bytes because format is signed 16 bits LE
+    static const unsigned BYTES_PER_SAMPLE = 2;
+    return BYTES_PER_SAMPLE;
+}
+
 std::chrono::seconds audio101::PcmPlayer::total_seconds() const {
     return std::chrono::seconds(total_seconds_);
 }
@@ -125,7 +139,7 @@ void audio101::PcmPlayer::play_for(int fd, std::chrono::seconds duration)
 {
     check_playing();
 
-    total_seconds_ = static_cast<unsigned>(duration.count());
+    total_seconds_ = duration;
     do_play(fd, duration);
 }
 
@@ -136,7 +150,7 @@ void audio101::PcmPlayer::play_file(int fd) {
     total_seconds_ = calc_duration(filesize);
     lseek(fd, 0, SEEK_SET);
 
-    do_play(fd, std::chrono::seconds(total_seconds_));
+    do_play(fd, total_seconds_);
 }
 
 void audio101::PcmPlayer::play_file(const std::string &path) {
@@ -149,13 +163,13 @@ void audio101::PcmPlayer::play_file(const std::string &path) {
     fseek(file_, 0, SEEK_SET);
 
     filename_ = path;
-    do_play(fileno(file_), std::chrono::seconds(total_seconds_));
+    do_play(fileno(file_), total_seconds_);
 }
 
 void audio101::PcmPlayer::play_for(const std::string &path, std::chrono::seconds duration) {
     check_playing();
 
-    total_seconds_ = static_cast<unsigned>(duration.count());
+    total_seconds_ = duration;
     file_ = fopen(path.c_str(), "rb");
 
     filename_ = path;
@@ -164,11 +178,9 @@ void audio101::PcmPlayer::play_for(const std::string &path, std::chrono::seconds
 
 void audio101::PcmPlayer::do_play(int fd, std::chrono::seconds duration)
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-    auto loop = std::bind(&audio101::PcmPlayer::play_loop, this, _1, _2);
-    player_thrd_ = std::thread(loop, fd, duration);
-    state_ = psPlaying;
+    auto loop = &PcmPlayer::play_loop;
+    state_ = PlayerState::playing;
+    player_thrd_ = std::thread(loop, this, fd, duration);
 }
 
 void audio101::PcmPlayer::play_loop(int fd, std::chrono::seconds duration)
@@ -180,7 +192,7 @@ void audio101::PcmPlayer::play_loop(int fd, std::chrono::seconds duration)
 
     // allocate buffer to hold single period
     snd_pcm_hw_params_get_period_size(pcm_params_, &frames, 0);
-    size_t buff_size = frames * channels() * bytes_per_sample;
+    size_t buff_size = frames * channels() * bytes_per_sample();
     std::unique_ptr<unsigned char[]> buffer(new unsigned char[buff_size]);
     unsigned char *bufferp = buffer.get();
 
@@ -222,7 +234,7 @@ void audio101::PcmPlayer::play_loop(int fd, std::chrono::seconds duration)
     }
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        state_ = psIdle;
+        state_ = PlayerState::idle;
     }
 }
 
@@ -262,7 +274,7 @@ int audio101::PcmPlayer::xrun_recovery(int err) const {
 
 void audio101::PcmPlayer::pause() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (state_ == psIdle) {
+    if (state_ == PlayerState::idle) {
         throw std::runtime_error("Unable to pause, not playing anything");
     }
     pause_mutex_.lock();
@@ -272,12 +284,12 @@ void audio101::PcmPlayer::pause() {
         msg += snd_strerror(err);
         throw std::runtime_error(msg.c_str());
     }
-    state_ = psPaused;
+    state_ = PlayerState::paused;
 }
 
 void audio101::PcmPlayer::resume() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (state_== psIdle) {
+    if (state_== PlayerState::idle) {
         throw std::runtime_error("Unable to resume, not playing anything");
     }
     pause_mutex_.unlock();
@@ -287,22 +299,24 @@ void audio101::PcmPlayer::resume() {
         msg += snd_strerror(err);
         throw std::runtime_error(msg.c_str());
     }
-    state_ = psPlaying;
+    state_ = PlayerState::playing;
 }
 
 void audio101::PcmPlayer::stop() {
     // TODO: I guess this isn't going to work if it started draining!
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (state_ != psIdle) {
+        if (state_ != PlayerState::idle) {
             stopped_ = true;
         }
     }
     pause_mutex_.unlock();
-    player_thrd_.join();
+    if (player_thrd_.joinable()) {
+        player_thrd_.join();
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        state_ = psIdle;
+        state_ = PlayerState::idle;
         if (file_ != nullptr) {
             fclose(file_);
             file_ = nullptr;
@@ -313,11 +327,11 @@ void audio101::PcmPlayer::stop() {
 
 void audio101::PcmPlayer::check_playing() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (state_ != psIdle) {
+    if (state_ != PlayerState::idle) {
         throw std::runtime_error("Playback already in progress");
     }
 }
 
-unsigned audio101::PcmPlayer::calc_duration(long filesize) const {
-    return static_cast<unsigned>(filesize) / (sample_rate_ * bytes_per_sample * channels_);
+std::chrono::seconds audio101::PcmPlayer::calc_duration(long filesize) const {
+    return std::chrono::seconds((filesize) / (sample_rate_ * bytes_per_sample() * channels_));
 }

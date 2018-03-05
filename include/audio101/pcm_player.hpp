@@ -11,16 +11,31 @@
 
 namespace audio101 {
 
-    enum PlayerState {
-        psIdle,
-        psPlaying,
-        psPaused
+    enum class PlayerState {
+        idle,
+        playing,
+        paused
     };
 
     class PcmPlayer {
     public:
         // TODO: sample rate/channels moved to play
         explicit PcmPlayer(const char *device, unsigned sample_rate, unsigned channels);
+        /**
+         * Not safe if already playing audio!
+         */
+        PcmPlayer(PcmPlayer&& player) :
+            state_(std::move(player.state_)),
+            file_(std::move(player.file_)),
+            filename_(std::move(player.filename_)),
+            stopped_(std::move(player.stopped_)),
+            total_seconds_(std::move(player.total_seconds_)),
+            sample_rate_(std::move(player.sample_rate_)),
+            channels_(std::move(player.channels_)),
+            pcm_handle_(std::move(player.pcm_handle_)),
+            pcm_params_(std::move(player.pcm_params_)),
+            player_thrd_(std::move(player.player_thrd_))
+        {}
         ~PcmPlayer();
 
         /**
@@ -39,6 +54,10 @@ namespace audio101 {
          * @return Sample rate used by device.
          */
         unsigned sample_rate() const;
+        /**
+         * @return Bytes per sample in audio.
+         */
+        unsigned bytes_per_sample() const;
         /**
          * @return Number of seconds that playback is going to last.
          */
@@ -114,9 +133,9 @@ namespace audio101 {
          * endian samples, `bytes_per_sample` is always 2.
          *
          * @param filesize Size in bytes.
-         * @return Total duration of audio file, in seconds.
+         * @return Total duration of audio file.
          */
-        unsigned calc_duration(long filesize) const;
+        std::chrono::seconds calc_duration(long filesize) const;
         /**
          * Attempt of recovery during playback.
          *
@@ -129,14 +148,11 @@ namespace audio101 {
          */
         int xrun_recovery(int err) const;
 
-        // every sample is 2 bytes because format is signed 16 bits LE
-        static const unsigned bytes_per_sample = 2;
-
-        PlayerState state_ = psIdle;
+        PlayerState state_ = PlayerState::idle;
         FILE* file_ = nullptr;
         std::string filename_;
         bool stopped_ = false;
-        unsigned total_seconds_ = 0;
+        std::chrono::seconds total_seconds_{0};
         unsigned sample_rate_;
         unsigned channels_;
 

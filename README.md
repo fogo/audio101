@@ -89,6 +89,27 @@ time: 0:11
 It isn't a perfect player, as it was just a weekend project, but I guess
 it works fine for its modest goals.
 
+## How is this tested?
+
+I took advantage that ALSA library, `libasound`, is linked dynamically
+to create a "fake" shared library that is able to replace its symbols.
+This shared library is `fakeasound`, and you can find its code in this
+repo too.
+
+It is intended to be used w/ `LD_PRELOAD` environment
+variable, so its symbols are loaded first and replace the actual ALSA
+symbols. You can see this in action when tests in `cmake` configuration
+are executed.
+
+I'm far from covering all paths and conditions in player (sorry!) but
+I just wanted to see how something like audio playback could be tested
+without messing with devices and operating system (and, of course,
+avoiding playing audio in tests because w/ automated tests that would
+quickly become tiresome).
+
+By the way, the unit tests were created using `fakeasound` used
+[Catch2 test framework](https://github.com/catchorg/Catch2).
+
 ## How could this evolve to an actual player?
 
 Basically, we'd have to add a bunch of codecs so we could decode all
