@@ -44,6 +44,7 @@ before_install:
   - eval "${MATRIX_EVAL}"
   - echo $CC
   - echo $CXX
+  - pip install --user cpp-coveralls
 
 install:
   # install ALSA lib
@@ -53,6 +54,9 @@ install:
 script:
   - mkdir build
   - cd build
-  - cmake ..
+  - cmake -DCOVERAGE=1 ..
   - cmake --build .
   - CTEST_OUTPUT_ON_FAILURE=1 ctest
+
+after_success:
+  - coveralls --root . -E ".*CMakeFiles.*"
